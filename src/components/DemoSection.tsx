@@ -1,11 +1,15 @@
-import { Camera, RefreshCw, Smile, Frown, Angry, AlertCircle, Zap, Meh } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Camera, Square, Smile, Frown, Angry, AlertCircle, Zap, Meh, AlertTriangle, VideoOff } from 'lucide-react';
+import { useEffect, useCallback } from 'react';
 import { Button } from './ui/button';
 import EmotionCard from './EmotionCard';
+import LoadingSpinner from './LoadingSpinner';
+import { useCamera } from '@/hooks/useCamera';
+import { useEmotionDetection } from '@/hooks/useEmotionDetection';
 
 const emotions = [
   { 
     name: 'Happy', 
+    key: 'happy',
     icon: Smile, 
     color: 'bg-emotion-happy/20 text-emotion-happy',
     barColor: 'bg-emotion-happy',
@@ -13,6 +17,7 @@ const emotions = [
   },
   { 
     name: 'Sad', 
+    key: 'sad',
     icon: Frown, 
     color: 'bg-emotion-sad/20 text-emotion-sad',
     barColor: 'bg-emotion-sad',
@@ -20,6 +25,7 @@ const emotions = [
   },
   { 
     name: 'Angry', 
+    key: 'angry',
     icon: Angry, 
     color: 'bg-emotion-angry/20 text-emotion-angry',
     barColor: 'bg-emotion-angry',
@@ -27,6 +33,7 @@ const emotions = [
   },
   { 
     name: 'Fear', 
+    key: 'fearful',
     icon: AlertCircle, 
     color: 'bg-emotion-fear/20 text-emotion-fear',
     barColor: 'bg-emotion-fear',
@@ -34,6 +41,7 @@ const emotions = [
   },
   { 
     name: 'Surprise', 
+    key: 'surprised',
     icon: Zap, 
     color: 'bg-emotion-surprise/20 text-emotion-surprise',
     barColor: 'bg-emotion-surprise',
@@ -41,6 +49,7 @@ const emotions = [
   },
   { 
     name: 'Neutral', 
+    key: 'neutral',
     icon: Meh, 
     color: 'bg-emotion-neutral/20 text-emotion-neutral',
     barColor: 'bg-emotion-neutral',
@@ -49,31 +58,48 @@ const emotions = [
 ];
 
 const DemoSection = () => {
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [emotionData, setEmotionData] = useState<number[]>([0, 0, 0, 0, 0, 0]);
-  const [dominantEmotion, setDominantEmotion] = useState(0);
+  const { videoRef, status: cameraStatus, error: cameraError, startCamera, stopCamera } = useCamera();
+  const { 
+    isModelLoading, 
+    isModelLoaded, 
+    modelLoadError, 
+    detection, 
+    startDetection, 
+    stopDetection 
+  } = useEmotionDetection();
 
-  const startAnalysis = () => {
-    setIsAnalyzing(true);
-    simulateDetection();
-  };
+  const isActive = cameraStatus === 'active';
+  const isLoading = cameraStatus === 'requesting' || isModelLoading;
 
-  const simulateDetection = () => {
-    // Simulate random emotion detection
-    const newData = emotions.map(() => Math.floor(Math.random() * 60) + 10);
-    const maxIndex = newData.indexOf(Math.max(...newData));
-    newData[maxIndex] = Math.min(newData[maxIndex] + 30, 98);
-    
-    setEmotionData(newData);
-    setDominantEmotion(maxIndex);
-  };
+  const handleStart = useCallback(async () => {
+    await startCamera();
+  }, [startCamera]);
 
+  const handleStop = useCallback(() => {
+    stopCamera();
+    stopDetection();
+  }, [stopCamera, stopDetection]);
+
+  // Start detection when camera is active
   useEffect(() => {
-    if (isAnalyzing) {
-      const interval = setInterval(simulateDetection, 2000);
-      return () => clearInterval(interval);
+    if (isActive && videoRef.current) {
+      startDetection(videoRef.current);
     }
-  }, [isAnalyzing]);
+  }, [isActive, videoRef, startDetection]);
+
+  // Get emotion data for cards
+  const getEmotionPercentage = (key: string): number => {
+    if (!detection || !detection.faceDetected) return 0;
+    return detection.emotions[key as keyof typeof detection.emotions] || 0;
+  };
+
+  const getDominantEmotionIndex = (): number => {
+    if (!detection || !detection.faceDetected) return -1;
+    return emotions.findIndex(e => e.key === detection.dominantEmotion);
+  };
+
+  const dominantIndex = getDominantEmotionIndex();
+  const dominantEmotion = dominantIndex >= 0 ? emotions[dominantIndex] : null;
 
   return (
     <section id="demo" className="py-24 relative">
@@ -93,75 +119,150 @@ const DemoSection = () => {
           {/* Camera View */}
           <div className="glass-card rounded-3xl p-6 border border-border/50">
             <div className="relative aspect-video bg-secondary/50 rounded-2xl overflow-hidden">
-              {/* Camera Feed Placeholder */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                {!isAnalyzing ? (
+              {/* Video Element - Always rendered but hidden when not active */}
+              <video
+                ref={videoRef}
+                className={`absolute inset-0 w-full h-full object-cover scale-x-[-1] ${isActive ? 'block' : 'hidden'}`}
+                playsInline
+                muted
+              />
+
+              {/* Idle State */}
+              {cameraStatus === 'idle' && (
+                <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center">
                     <Camera className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                    <p className="text-muted-foreground">Camera feed will appear here</p>
+                    <p className="text-muted-foreground">Click "Start Camera" to begin detection</p>
                   </div>
-                ) : (
-                  <>
-                    {/* Simulated Camera View */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-secondary via-muted to-secondary" />
-                    
-                    {/* Face Detection Box */}
-                    <div className="absolute inset-12 border-2 border-primary rounded-lg animate-pulse-glow">
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-primary text-primary-foreground text-xs font-semibold rounded-full">
-                        Face Detected
+                </div>
+              )}
+
+              {/* Loading State */}
+              {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+                  <LoadingSpinner 
+                    size="lg" 
+                    text={cameraStatus === 'requesting' ? 'Requesting camera access...' : 'Loading AI models...'} 
+                  />
+                </div>
+              )}
+
+              {/* Error State */}
+              {(cameraStatus === 'error' || cameraStatus === 'denied') && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center px-4">
+                    <AlertTriangle className="w-16 h-16 text-destructive mx-auto mb-4" />
+                    <p className="text-destructive font-medium mb-2">Camera Access Error</p>
+                    <p className="text-muted-foreground text-sm max-w-xs">{cameraError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Model Load Error */}
+              {modelLoadError && isActive && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+                  <div className="text-center px-4">
+                    <AlertTriangle className="w-16 h-16 text-destructive mx-auto mb-4" />
+                    <p className="text-destructive font-medium mb-2">Model Loading Error</p>
+                    <p className="text-muted-foreground text-sm max-w-xs">{modelLoadError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Active State Overlays */}
+              {isActive && !modelLoadError && (
+                <>
+                  {/* Loading models overlay */}
+                  {isModelLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+                      <LoadingSpinner size="lg" text="Loading AI models..." />
+                    </div>
+                  )}
+
+                  {/* No face detected warning */}
+                  {isModelLoaded && detection && !detection.faceDetected && (
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-destructive/80 text-destructive-foreground rounded-full text-sm font-medium flex items-center gap-2">
+                      <VideoOff className="w-4 h-4" />
+                      No face detected
+                    </div>
+                  )}
+
+                  {/* Face Detection Box - Only show when face is detected */}
+                  {isModelLoaded && detection?.faceDetected && (
+                    <>
+                      <div className="absolute inset-12 border-2 border-primary rounded-lg animate-pulse-glow pointer-events-none">
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-primary text-primary-foreground text-xs font-semibold rounded-full">
+                          Face Detected
+                        </div>
                       </div>
-                      
-                      {/* Facial Landmark Points */}
-                      <div className="absolute top-1/4 left-1/3 w-2 h-2 bg-primary rounded-full animate-pulse" />
-                      <div className="absolute top-1/4 right-1/3 w-2 h-2 bg-primary rounded-full animate-pulse" />
-                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 w-2 h-2 bg-primary rounded-full animate-pulse" />
-                      <div className="absolute bottom-1/3 left-1/2 -translate-x-1/2 w-12 h-1 bg-primary rounded-full" />
-                    </div>
 
-                    {/* Scan Line */}
-                    <div className="absolute inset-0 overflow-hidden">
-                      <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-primary to-transparent animate-scan-line" />
-                    </div>
+                      {/* Scan Line */}
+                      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                        <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-primary to-transparent animate-scan-line" />
+                      </div>
+                    </>
+                  )}
 
-                    {/* Dominant Emotion Badge */}
+                  {/* Dominant Emotion Badge */}
+                  {isModelLoaded && detection?.faceDetected && dominantEmotion && (
                     <div className="absolute bottom-4 left-4 right-4 glass-card rounded-xl p-4 flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        {(() => {
-                          const Icon = emotions[dominantEmotion].icon;
-                          return <Icon className={`w-8 h-8 ${emotions[dominantEmotion].color.split(' ')[1]}`} />;
-                        })()}
+                        <dominantEmotion.icon className={`w-8 h-8 ${dominantEmotion.color.split(' ')[1]}`} />
                         <div>
                           <p className="text-xs text-muted-foreground">Detected Emotion</p>
-                          <p className="font-display font-bold text-lg">{emotions[dominantEmotion].name}</p>
+                          <p className="font-display font-bold text-lg">{dominantEmotion.name}</p>
                         </div>
                       </div>
                       <div className="text-right">
                         <p className="text-xs text-muted-foreground">Confidence</p>
-                        <p className="font-display font-bold text-lg text-primary">{emotionData[dominantEmotion]}%</p>
+                        <p className="font-display font-bold text-lg text-primary">{detection.confidence}%</p>
                       </div>
                     </div>
-                  </>
-                )}
-              </div>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Controls */}
             <div className="flex gap-4 mt-6">
-              <Button 
-                className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 glow-box font-semibold"
-                onClick={startAnalysis}
-                disabled={isAnalyzing}
-              >
-                <Camera className="w-5 h-5 mr-2" />
-                {isAnalyzing ? 'Analyzing...' : 'Start Camera'}
-              </Button>
-              <Button 
-                variant="outline" 
-                className="border-border bg-transparent hover:bg-secondary"
-                onClick={() => setIsAnalyzing(false)}
-              >
-                <RefreshCw className="w-5 h-5" />
-              </Button>
+              {!isActive ? (
+                <Button 
+                  className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 glow-box font-semibold"
+                  onClick={handleStart}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <>
+                      <LoadingSpinner size="sm" className="mr-2" />
+                      Connecting...
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="w-5 h-5 mr-2" />
+                      Start Camera
+                    </>
+                  )}
+                </Button>
+              ) : (
+                <Button 
+                  className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90 font-semibold"
+                  onClick={handleStop}
+                >
+                  <Square className="w-5 h-5 mr-2" />
+                  Stop Detection
+                </Button>
+              )}
+            </div>
+
+            {/* Status indicator */}
+            <div className="mt-4 flex items-center justify-center gap-2 text-sm">
+              <div className={`w-2 h-2 rounded-full ${isActive && isModelLoaded ? 'bg-green-500 animate-pulse' : 'bg-muted'}`} />
+              <span className="text-muted-foreground">
+                {!isActive && 'Camera inactive'}
+                {isActive && isModelLoading && 'Loading AI models...'}
+                {isActive && isModelLoaded && detection?.faceDetected && 'Detecting emotions in real-time'}
+                {isActive && isModelLoaded && !detection?.faceDetected && 'Waiting for face...'}
+              </span>
             </div>
           </div>
 
@@ -172,10 +273,10 @@ const DemoSection = () => {
                 key={emotion.name}
                 name={emotion.name}
                 icon={emotion.icon}
-                percentage={emotionData[index]}
+                percentage={getEmotionPercentage(emotion.key)}
                 color={emotion.color}
                 description={emotion.description}
-                isActive={isAnalyzing && index === dominantEmotion}
+                isActive={isActive && isModelLoaded && index === dominantIndex}
                 delay={index * 100}
               />
             ))}
